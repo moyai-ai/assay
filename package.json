@@ -1,0 +1,24 @@
+{
+  "name": "assay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Best-of-N coding candidate verification with probabilistic pivot tournaments",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "tsx --test test/*.test.ts",
+    "demo": "tsx examples/offline.ts"
+  },
+  "dependencies": {
+    "@openai/agents": "0.17.2",
+    "openai": "7.12.1",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}
