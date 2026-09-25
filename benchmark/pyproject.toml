@@ -1,0 +1,9 @@
+[project]
+name = "assay-benchmark"
+version = "0.1.0"
+description = "Terminal-Bench 2.1 generation smoke test for Assay"
+requires-python = ">=3.12,<3.14"
+dependencies = ["harbor==0.23.0", "python-dotenv==1.2.3"]
+
+[tool.uv]
+package = false

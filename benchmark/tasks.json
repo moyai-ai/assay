@@ -1,0 +1,18 @@
+{
+  "dataset": "terminal-bench/terminal-bench-2-1",
+  "repository": "https://github.com/harbor-framework/terminal-bench-2-1.git",
+  "revision": "7131e4375048a0e408a8fb404b5f499d726b695b",
+  "selection": "Fixed coding-oriented smoke subset chosen from instructions, not observed rewards. Not representative of the full benchmark.",
+  "tasks": [
+    "cancel-async-tasks",
+    "build-cython-ext",
+    "filter-js-from-html",
+    "kv-store-grpc",
+    "log-summary-date-ranges",
+    "multi-source-data-merger",
+    "polyglot-c-py",
+    "regex-log",
+    "schemelike-metacircular-eval",
+    "write-compressor"
+  ]
+}

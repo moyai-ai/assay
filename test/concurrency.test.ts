@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import OpenAI from 'openai';
-import { mapConcurrent, RequestLimiter } from '../src/concurrency.js';
+import { mapConcurrent } from '../src/concurrency.js';
 import { PairwiseVerifier } from '../src/verifier/pairwise.js';
 import { selectBest } from '../src/verifier/tournament.js';
 import { completion } from './fixtures.js';
@@ -41,41 +41,33 @@ test('shared endpoint limiter bounds calls across concurrent comparisons', async
       return new Response(JSON.stringify(completion()), { headers: { 'content-type': 'application/json' } });
     },
   });
-  const limiter = new RequestLimiter(2);
-  const config = { model: 'test', contextWindowTokens: 131072, concurrency: 4 };
-  const a = new PairwiseVerifier(client, config, undefined, undefined, limiter);
-  const b = new PairwiseVerifier(client, config, undefined, undefined, limiter);
-  await Promise.all([a.compare('task', 'a', 'b'), b.compare('task', 'c', 'd')]);
+  const verifier = new PairwiseVerifier(client, { model: 'test', contextWindowTokens: 131072, concurrency: 2 });
+  await Promise.all([verifier.compare('task', 'a', 'b'), verifier.compare('task', 'c', 'd')]);
   assert.equal(maximum, 2);
 });
 
-test('parse failure gets bounded resampling, archives attempts; probe is explicit', async () => {
+test('probe archives malformed responses and fails without resampling', async () => {
   let calls = 0;
-  const attempts: number[] = [];
+  const responses: unknown[] = [];
   const client = new OpenAI({ apiKey: 'synthetic-key', baseURL: 'https://synthetic.example/v1', maxRetries: 0,
     fetch: async () => {
       calls++;
       return new Response(JSON.stringify(calls === 1 ? { choices: [] } : completion()), { headers: { 'content-type': 'application/json' } });
     },
   });
-  const verifier = new PairwiseVerifier(client, { model: 'test', contextWindowTokens: 131072 }, event => { attempts.push(event.attempt); });
-  const result = await verifier.probe();
-  assert.equal(result.a.normalizedScore, 1);
+  const verifier = new PairwiseVerifier(client, { model: 'test', contextWindowTokens: 131072 }, event => { responses.push(event.response); });
+  await assert.rejects(() => verifier.probe());
+  assert.equal(calls, 1);
+  assert.deepEqual(responses, [{ choices: [] }]);
+  assert.equal((await verifier.probe()).a.normalizedScore, 1);
   assert.equal(calls, 2);
-  assert.deepEqual(attempts, [0, 1]);
 });
 
-test('explicit degraded mode records ties per candidate and never caches failures', async () => {
-  let attempts = 0;
-  const result = await selectBest(3, async (a, b) => {
-    if (a === 2 && b === 0 && attempts++ === 0) throw new Error('transient failure');
-    return [0.5, 0.5];
-  }, { ring: [[0, 1], [1, 2], [2, 0]], pivots: 1, onError: 'tie', maxErrorFraction: 0.2 });
-  assert.equal(attempts, 2); // Same directed pair succeeds in pivot phase, not cached as a tie.
-  assert.equal(result.errors.length, 1);
-  assert.equal(result.verificationComplete, false);
-  assert.deepEqual(result.candidateErrorCounts, [1, 0, 1]);
-  await assert.rejects(() => selectBest(3, async () => { throw new Error('unsupported endpoint'); }, {
-    onError: 'tie', maxErrorFraction: 0.1,
-  }), /error fraction/);
+test('tournament failure stops scheduling and never substitutes a tie', async () => {
+  let calls = 0;
+  await assert.rejects(() => selectBest(3, async () => {
+    calls++;
+    throw new Error('unsupported endpoint');
+  }, { concurrency: 1 }), /unsupported endpoint/);
+  assert.equal(calls, 1);
 });

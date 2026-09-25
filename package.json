@@ -2,14 +2,28 @@
   "name": "assay",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "Best-of-N coding candidate verification with probabilistic pivot tournaments",
   "type": "module",
-  "engines": { "node": ">=22" },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" }
+  },
+  "files": ["dist", "LICENSE"],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "check": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
     "test": "tsx --test test/*.test.ts",
-    "demo": "tsx examples/offline.ts"
+    "benchmark:prepare": "uv run --frozen --project benchmark python -m benchmark.cli prepare",
+    "benchmark:run": "uv run --frozen --project benchmark python -m benchmark.cli run",
+    "benchmark:scale": "uv run --frozen --project benchmark python -m benchmark.scaling",
+    "benchmark:report": "uv run --frozen --project benchmark python -m benchmark.cli report",
+    "benchmark:test": "uv run --frozen --project benchmark python -m unittest discover -s benchmark/tests -v"
   },
   "dependencies": {
     "@openai/agents": "0.17.2",
@@ -19,6 +33,7 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "tsx": "^4.20.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "undici": "7.29.1"
   }
 }

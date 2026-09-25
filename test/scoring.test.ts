@@ -24,6 +24,32 @@ test('finds tagged token with reasoning prefix, Unicode and fused >A spellings',
   assert.equal(result.score_B!.normalizedScore, 0);
 });
 
+test('aligns split UTF-8 bytes including astral symbols before and between scores', () => {
+  const visible = '判断🙂 <score_A> A </score_A> → <score_B> T </score_B>';
+  const bytes = Buffer.from('hidden reasoning 🧪\n' + visible);
+  const positions = [...bytes].map(byte => ({
+    token: Buffer.from([byte]).toString('utf8'), bytes: [byte], logprob: 0,
+    top_logprobs: [{ token: String.fromCharCode(byte), bytes: [byte], logprob: 0 }],
+  }));
+  const payload = { choices: [{ finish_reason: 'stop', message: { content: visible }, logprobs: { content: positions } }] };
+  assert.ok(!positions.map(p => p.token).join('').includes(visible));
+  const scores = extractScores(payload);
+  assert.equal(scores.score_A!.normalizedScore, 1);
+  assert.equal(scores.score_B!.normalizedScore, 0);
+  const corrupt = structuredClone(payload);
+  corrupt.choices[0]!.logprobs.content[0]!.bytes = [255];
+  assert.throws(() => extractScores(corrupt));
+  const mismatch = structuredClone(payload);
+  mismatch.choices[0]!.message.content += 'extra';
+  assert.throws(() => extractScores(mismatch), /align/);
+});
+
+test('missing verdicts remain errors even with valid byte alignment', () => {
+  const payload = { choices: [{ finish_reason: 'stop', message: { content: 'No verdict.' },
+    logprobs: { content: [{ token: 'No verdict.', bytes: [...Buffer.from('No verdict.')], logprob: 0, top_logprobs: [] }] } }] };
+  assert.throws(() => extractScores(payload), /exactly one/);
+});
+
 test('merges different spellings by summed probability, not max', () => {
   const result = extractScores(completion('A', 'T', { alternativesA: [
     { token: 'A', logprob: Math.log(0.2) }, { token: ' A', logprob: Math.log(0.2) },
@@ -40,16 +66,15 @@ test('stable expectation for underflowed probabilities; exposes log mass', () =>
   near(result.score_A!.normalizedScore, 0.5);
   assert.equal(result.score_A!.capturedMass, 0);
   assert.ok(Number.isFinite(result.score_A!.logCapturedMass));
-  assert.throws(() => extractScores(completion('A', 'T', { alternativesA: [{ token: 'A', logprob: -1000 }] }), ['score_A'], 0.01), /Insufficient/);
+  assert.throws(() => extractScores(completion('A', 'T', { alternativesA: [{ token: 'A', logprob: -1000 }] }), 0.01), /Insufficient/);
 });
 
-test('validates all score tags including ordering and whitespace', () => {
+test('requires both fixed verdict tags and a valid mass threshold', () => {
   const payload = completion();
-  assert.deepEqual(Object.keys(extractScores(payload, ['score_B', 'score_A'])), ['score_B', 'score_A']);
-  assert.throws(() => extractScores(payload, ['score_A', 'score_A']), /unique/);
-  assert.throws(() => extractScores(payload, ['score_A.*']), /Invalid/);
-  assert.throws(() => extractScores(payload, []), /nonempty/);
-  assert.throws(() => extractScores(payload, ['score_C']), /exactly one/);
+  assert.deepEqual(Object.keys(extractScores(payload)), ['score_A', 'score_B']);
+  for (const threshold of [-1, 2, NaN]) assert.throws(() => extractScores(payload, threshold), /minCapturedMass/);
+  payload.choices[0]!.message.content = '<score_A> A </score_A>';
+  assert.throws(() => extractScores(payload), /score_B/);
 });
 
 test('fails closed on absent logprobs, bad alignment, duplicate tags, and truncated responses', () => {

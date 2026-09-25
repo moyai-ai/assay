@@ -2,7 +2,10 @@ import { z } from 'zod';
 
 export const SCORE_LETTERS = 'ABCDEFGHIJKLMNOPQRST';
 const logprob = z.number().finite().max(0);
-const alternativeSchema = z.object({ token: z.string(), logprob });
+const alternativeSchema = z.object({
+  token: z.string(), logprob,
+  bytes: z.array(z.number().int().min(0).max(255)).nullable().optional(),
+});
 const positionSchema = alternativeSchema.extend({
   top_logprobs: z.array(alternativeSchema),
 });
@@ -25,10 +28,6 @@ export interface ScoreDistribution {
   coverage: number;
 }
 
-export interface ScoreExtractor {
-  (response: unknown, tags: readonly string[]): Record<string, ScoreDistribution>;
-}
-
 function letterOf(token: string): string | undefined {
   const letter = token.trim().replace(/^>\s*/, '');
   return letter.length === 1 && SCORE_LETTERS.includes(letter) ? letter : undefined;
@@ -42,23 +41,28 @@ function logSumExp(values: number[]): number {
 /** Harbor-compatible A=20 … T=1 expectation; never silently uses the sampled letter. */
 export function extractScores(
   response: unknown,
-  tags: readonly string[] = ['score_A', 'score_B'],
   minCapturedMass = 0,
-): Record<string, ScoreDistribution> {
+): Record<'score_A' | 'score_B', ScoreDistribution> {
   if (!Number.isFinite(minCapturedMass) || minCapturedMass < 0 || minCapturedMass > 1) {
     throw new Error('minCapturedMass must be in [0, 1]');
   }
-  if (!tags.length || new Set(tags).size !== tags.length) throw new Error('Tags must be nonempty and unique');
   const choice = responseSchema.parse(response).choices[0]!;
   const content = choice.message.content;
   const positions = choice.logprobs.content;
-  const generated = positions.map(p => p.token).join('');
-  // Some providers prepend reasoning tokens to the visible-content logprob stream.
-  const visibleOffset = generated.lastIndexOf(content);
+  // A UTF-8 code point can straddle tokens. Individually decoded token strings
+  // then contain replacement characters; concatenating those strings is lossy.
+  // Preserve byte offsets all the way to the selected score-token position.
+  const tokenBytes = (p: z.infer<typeof alternativeSchema>) => p.bytes == null
+    ? Buffer.from(p.token, 'utf8') : Buffer.from(p.bytes);
+  const buffers = positions.map(tokenBytes);
+  const generated = Buffer.concat(buffers);
+  // Reject corrupt byte streams, not just missing verdicts. Reasoning prefixes
+  // remain supported, but the complete visible text must align exactly.
+  new TextDecoder('utf-8', { fatal: true }).decode(generated);
+  const visibleOffset = generated.lastIndexOf(Buffer.from(content, 'utf8'));
   if (visibleOffset < 0) throw new Error('Visible content does not align with logprob tokens');
-  const results: Record<string, ScoreDistribution> = Object.create(null);
-  for (const tag of tags) {
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(tag)) throw new Error(`Invalid score tag: ${tag}`);
+  const results = {} as Record<'score_A' | 'score_B', ScoreDistribution>;
+  for (const tag of ['score_A', 'score_B'] as const) {
     const matches = [...content.matchAll(new RegExp(`<${tag}>\\s*([A-T])\\s*</${tag}>`, 'g'))];
     // Strict protocol: duplicate verdicts, even identical ones, are ambiguous.
     if (matches.length !== 1 || content.split(`<${tag}>`).length !== 2) {
@@ -68,14 +72,15 @@ export function extractScores(
     const selected = match[1]!;
     const insideOffset = match[0].indexOf('>') + 1;
     const letterOffset = match[0].slice(insideOffset).search(/[A-T]/) + insideOffset;
-    const target = visibleOffset + match.index! + letterOffset;
+    const target = visibleOffset + Buffer.byteLength(content.slice(0, match.index! + letterOffset), 'utf8');
     let offset = 0;
-    const position = positions.find(p => {
-      const contains = offset <= target && target < offset + p.token.length;
-      offset += p.token.length;
+    const position = positions.find((_p, index) => {
+      const length = buffers[index]!.length;
+      const contains = offset <= target && target < offset + length;
+      offset += length;
       return contains;
     });
-    if (!position || letterOf(position.token) !== selected) {
+    if (!position || letterOf(tokenBytes(position).toString('utf8')) !== selected) {
       throw new Error(`Unsupported score token boundary for ${tag}`);
     }
     const byLetter = new Map<string, number[]>();
@@ -83,7 +88,7 @@ export function extractScores(
     for (const alt of position.top_logprobs) {
       if (seen.has(alt.token)) throw new Error('Duplicate top-logprob token');
       seen.add(alt.token);
-      const letter = letterOf(alt.token);
+      const letter = letterOf(tokenBytes(alt).toString('utf8'));
       if (letter) byLetter.set(letter, [...(byLetter.get(letter) ?? []), alt.logprob]);
     }
     if (!byLetter.size) throw new Error(`No A–T alternatives for ${tag}`);

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderCandidate, byteLength, type Candidate } from '../src/candidates.js';
+import { renderCandidate, type Candidate } from '../src/candidates.js';
 
 const candidate: Candidate = { id: 'secret-model-name', baseSha: 'a'.repeat(40), diff: '+fix', testOutput: '1 passed' };
 
@@ -13,12 +13,12 @@ test('renders anonymous evidence with a content digest', async () => {
   assert.equal(a.truncated, false);
 });
 
-test('defaults to rejection; opt-in middle truncation respects UTF-8 byte bounds', async () => {
+test('defaults to rejection; opt-in middle truncation respects UTF-8 byte bounds', () => {
   const big = { ...candidate, diff: '🧪éabc'.repeat(2000) };
-  await assert.rejects(() => renderCandidate(big, 600), /exceeds evidence budget/);
-  const rendered = await renderCandidate(big, 600, true);
+  assert.throws(() => renderCandidate(big, 600), /exceeds evidence budget/);
+  const rendered = renderCandidate(big, 600, true);
   assert.ok(rendered.truncated);
-  assert.ok(byteLength(rendered.text) <= 600);
+  assert.ok(Buffer.byteLength(rendered.text) <= 600);
   assert.match(rendered.text, /EVIDENCE MIDDLE OMITTED/);
   assert.ok(!rendered.text.includes('\ufffd'));
   assert.ok(rendered.text.includes(rendered.sha256));

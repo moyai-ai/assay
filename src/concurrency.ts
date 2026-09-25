@@ -1,4 +1,4 @@
-/** FIFO limiter. Share one instance across verifiers using the same endpoint budget. */
+/** FIFO request limit shared by all comparisons on one verifier instance. */
 export class RequestLimiter {
   private active = 0;
   private readonly waiting: Array<() => void> = [];

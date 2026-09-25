@@ -5,3 +5,12 @@ dist/
 !.env.example
 artifacts/
 *.tsbuildinfo
+benchmark/.venv/
+benchmark/.cache/
+benchmark/runs/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+coverage/
+.DS_Store
+*.tgz

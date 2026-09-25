@@ -5,7 +5,6 @@ import { selectBest, type TournamentOptions } from './verifier/tournament.js';
 export interface SelectionOptions extends TournamentOptions {
   maxEvidenceBytes?: number;
   allowTruncation?: boolean;
-  signal?: AbortSignal;
 }
 
 /** Rank already generated, eligible candidates sharing exactly the same immutable base. */
@@ -18,10 +17,10 @@ export async function selectCandidate(
   options.signal?.throwIfAborted();
   if (!task.trim()) throw new Error('Task must be nonempty');
   const parsed = candidates.map(candidate => candidateSchema.parse(candidate));
-  if (!parsed.length) throw new Error('At least one candidate is required');
+  if (parsed.length < 2) throw new Error('At least two candidates are required');
   if (new Set(parsed.map(c => c.id)).size !== parsed.length) throw new Error('Candidate ids must be unique');
   if (new Set(parsed.map(c => c.baseSha)).size !== 1) throw new Error('All candidates must share the same base SHA');
-  const evidence = await Promise.all(parsed.map(c => renderCandidate(c, options.maxEvidenceBytes, options.allowTruncation)));
+  const evidence = parsed.map(c => renderCandidate(c, options.maxEvidenceBytes, options.allowTruncation));
   // Validate every possible directed pair before sending the first model request.
   for (let a = 0; a < parsed.length; a++) {
     for (let b = 0; b < parsed.length; b++) {
@@ -37,7 +36,6 @@ export async function selectCandidate(
   }, options);
   return {
     protocolVersion: PROTOCOL_VERSION,
-    verificationComplete: tournament.verificationComplete,
     winnerId: parsed[tournament.winner]!.id,
     ranking: tournament.ranking.map(i => parsed[i]!.id),
     tournament,
